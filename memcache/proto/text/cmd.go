@@ -1,4 +1,4 @@
-package memcache
+package text
 
 import (
 	"bufio"
@@ -8,44 +8,46 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/skinass/gomemcache/memcache/types"
 )
 
-const TextProtoType = "text"
+const ProtoType = "text"
 
-var textCommander = &textCmdRunner{}
+var DefaultTextCommander = &cmdRunner{}
 
-type textCmdRunner struct{}
+type cmdRunner struct{}
 
-func (pcr *textCmdRunner) ProtoType() string {
-	return TextProtoType
+func (r *cmdRunner) ProtoType() string {
+	return ProtoType
 }
 
-func (pcr *textCmdRunner) IsAuthSupported() bool {
+func (r *cmdRunner) IsAuthSupported() bool {
 	return false
 }
-func (pcr *textCmdRunner) Auth(*bufio.ReadWriter, string, string) error {
+func (r *cmdRunner) Auth(*bufio.ReadWriter, string, string) error {
 	return errors.New("method Auth is not implemented for plain cmd runner")
 }
-func (pcr *textCmdRunner) GetCmd(rw *bufio.ReadWriter, keys []string, cb func(*Item)) error {
+func (r *cmdRunner) Get(rw *bufio.ReadWriter, keys []string, cb func(*types.Item)) error {
 	if _, err := fmt.Fprintf(rw, "gets %s\r\n", strings.Join(keys, " ")); err != nil {
 		return err
 	}
 	if err := rw.Flush(); err != nil {
 		return err
 	}
-	if err := pcr.parseGetResponse(rw.Reader, cb); err != nil {
+	if err := parseGetResponse(rw.Reader, cb); err != nil {
 		return err
 	}
 	return nil
 }
-func (pcr *textCmdRunner) PopulateCmd(rw *bufio.ReadWriter, verb string, item *Item) error {
-	if !legalKey(item.Key) {
-		return ErrMalformedKey
+func (r *cmdRunner) Populate(rw *bufio.ReadWriter, verb types.Verb, item *types.Item) error {
+	if !r.LegalKey(item.Key) {
+		return types.ErrMalformedKey
 	}
 	var err error
-	if verb == "cas" {
+	if verb == types.Cas {
 		_, err = fmt.Fprintf(rw, "%s %s %d %d %d %d\r\n",
-			verb, item.Key, item.Flags, item.Expiration, len(item.Value), item.casid)
+			verb, item.Key, item.Flags, item.Expiration, len(item.Value), item.Casid)
 	} else {
 		_, err = fmt.Fprintf(rw, "%s %s %d %d %d\r\n",
 			verb, item.Key, item.Flags, item.Expiration, len(item.Value))
@@ -70,29 +72,29 @@ func (pcr *textCmdRunner) PopulateCmd(rw *bufio.ReadWriter, verb string, item *I
 	case bytes.Equal(line, resultStored):
 		return nil
 	case bytes.Equal(line, resultNotStored):
-		return ErrNotStored
+		return types.ErrNotStored
 	case bytes.Equal(line, resultExists):
-		return ErrCASConflict
+		return types.ErrCASConflict
 	case bytes.Equal(line, resultNotFound):
-		return ErrCacheMiss
+		return types.ErrCacheMiss
 	}
 	return fmt.Errorf("memcache: unexpected response line from %q: %q", verb, string(line))
 }
 
-func (pcr *textCmdRunner) Delete(rw *bufio.ReadWriter, key string) error {
-	return pcr.writeExpectf(rw, resultDeleted, "delete %s\r\n", key)
+func (r *cmdRunner) Delete(rw *bufio.ReadWriter, key string) error {
+	return r.writeExpectf(rw, resultDeleted, "delete %s\r\n", key)
 }
 
-func (pcr *textCmdRunner) DeleteAll(rw *bufio.ReadWriter) error {
-	return pcr.writeExpectf(rw, resultDeleted, "flush_all\r\n")
+func (r *cmdRunner) DeleteAll(rw *bufio.ReadWriter) error {
+	return r.writeExpectf(rw, resultDeleted, "flush_all\r\n")
 }
 
-func (pcr *textCmdRunner) FlushAll(rw *bufio.ReadWriter) error {
-	return pcr.writeExpectf(rw, resultOK, "flush_all\r\n")
+func (r *cmdRunner) FlushAll(rw *bufio.ReadWriter) error {
+	return r.writeExpectf(rw, resultOK, "flush_all\r\n")
 }
 
-func (pcr *textCmdRunner) writeExpectf(rw *bufio.ReadWriter, expect []byte, format string, args ...interface{}) error {
-	line, err := pcr.writeReadLine(rw, format, args...)
+func (r *cmdRunner) writeExpectf(rw *bufio.ReadWriter, expect []byte, format string, args ...interface{}) error {
+	line, err := writeReadLine(rw, format, args...)
 	if err != nil {
 		return err
 	}
@@ -102,16 +104,16 @@ func (pcr *textCmdRunner) writeExpectf(rw *bufio.ReadWriter, expect []byte, form
 	case bytes.Equal(line, expect):
 		return nil
 	case bytes.Equal(line, resultNotStored):
-		return ErrNotStored
+		return types.ErrNotStored
 	case bytes.Equal(line, resultExists):
-		return ErrCASConflict
+		return types.ErrCASConflict
 	case bytes.Equal(line, resultNotFound):
-		return ErrCacheMiss
+		return types.ErrCacheMiss
 	}
 	return fmt.Errorf("memcache: unexpected response line: %q", string(line))
 }
 
-func (pcr *textCmdRunner) Ping(rw *bufio.ReadWriter) error {
+func (r *cmdRunner) Ping(rw *bufio.ReadWriter) error {
 	if _, err := fmt.Fprintf(rw, "version\r\n"); err != nil {
 		return err
 	}
@@ -132,7 +134,7 @@ func (pcr *textCmdRunner) Ping(rw *bufio.ReadWriter) error {
 	return nil
 }
 
-func (pcr *textCmdRunner) Touch(rw *bufio.ReadWriter, keys []string, expiration int32) error {
+func (r *cmdRunner) Touch(rw *bufio.ReadWriter, keys []string, expiration int32) error {
 	for _, key := range keys {
 		if _, err := fmt.Fprintf(rw, "touch %s %d\r\n", key, expiration); err != nil {
 			return err
@@ -148,7 +150,7 @@ func (pcr *textCmdRunner) Touch(rw *bufio.ReadWriter, keys []string, expiration 
 		case bytes.Equal(line, resultTouched):
 			break
 		case bytes.Equal(line, resultNotFound):
-			return ErrCacheMiss
+			return types.ErrCacheMiss
 		default:
 			return fmt.Errorf("memcache: unexpected response line from touch: %q", string(line))
 		}
@@ -156,14 +158,14 @@ func (pcr *textCmdRunner) Touch(rw *bufio.ReadWriter, keys []string, expiration 
 	return nil
 }
 
-func (pcr *textCmdRunner) IncrDecrCmd(rw *bufio.ReadWriter, verb, key string, delta uint64) (uint64, error) {
-	line, err := pcr.writeReadLine(rw, "%s %s %d\r\n", verb, key, delta)
+func (r *cmdRunner) IncrDecr(rw *bufio.ReadWriter, verb types.Verb, key string, delta uint64) (uint64, error) {
+	line, err := writeReadLine(rw, "%s %s %d\r\n", verb, key, delta)
 	if err != nil {
 		return 0, err
 	}
 	switch {
 	case bytes.Equal(line, resultNotFound):
-		return 0, ErrCacheMiss
+		return 0, types.ErrCacheMiss
 	case bytes.HasPrefix(line, resultClientErrorPrefix):
 		errMsg := line[len(resultClientErrorPrefix) : len(line)-2]
 		return 0, errors.New("memcache: client error: " + string(errMsg))
@@ -175,7 +177,7 @@ func (pcr *textCmdRunner) IncrDecrCmd(rw *bufio.ReadWriter, verb, key string, de
 	return val, nil
 }
 
-func (pcr *textCmdRunner) writeReadLine(rw *bufio.ReadWriter, format string, args ...interface{}) ([]byte, error) {
+func writeReadLine(rw *bufio.ReadWriter, format string, args ...interface{}) ([]byte, error) {
 	_, err := fmt.Fprintf(rw, format, args...)
 	if err != nil {
 		return nil, err
@@ -189,9 +191,9 @@ func (pcr *textCmdRunner) writeReadLine(rw *bufio.ReadWriter, format string, arg
 
 // scanGetResponseLine populates it and returns the declared size of the item.
 // It does not read the bytes of the item.
-func (pcr *textCmdRunner) scanGetResponseLine(line []byte, it *Item) (size int, err error) {
+func scanGetResponseLine(line []byte, it *types.Item) (size int, err error) {
 	pattern := "VALUE %s %d %d %d\r\n"
-	dest := []interface{}{&it.Key, &it.Flags, &size, &it.casid}
+	dest := []interface{}{&it.Key, &it.Flags, &size, &it.Casid}
 	if bytes.Count(line, space) == 3 {
 		pattern = "VALUE %s %d %d\r\n"
 		dest = dest[:3]
@@ -204,23 +206,23 @@ func (pcr *textCmdRunner) scanGetResponseLine(line []byte, it *Item) (size int, 
 }
 
 // parseGetResponse reads a GET response from r and calls cb for each
-// read and allocated Item
-func (pcr *textCmdRunner) parseGetResponse(r *bufio.Reader, cb func(*Item)) error {
+// read and allocated types.Item
+func parseGetResponse(rd *bufio.Reader, cb func(*types.Item)) error {
 	for {
-		line, err := r.ReadSlice('\n')
+		line, err := rd.ReadSlice('\n')
 		if err != nil {
 			return err
 		}
 		if bytes.Equal(line, resultEnd) {
 			return nil
 		}
-		it := new(Item)
-		size, err := pcr.scanGetResponseLine(line, it)
+		it := new(types.Item)
+		size, err := scanGetResponseLine(line, it)
 		if err != nil {
 			return err
 		}
 		it.Value = make([]byte, size+2)
-		_, err = io.ReadFull(r, it.Value)
+		_, err = io.ReadFull(rd, it.Value)
 		if err != nil {
 			it.Value = nil
 			return err
@@ -234,7 +236,7 @@ func (pcr *textCmdRunner) parseGetResponse(r *bufio.Reader, cb func(*Item)) erro
 	}
 }
 
-func legalKey(key string) bool {
+func (r *cmdRunner) LegalKey(key string) bool {
 	if len(key) > 250 {
 		return false
 	}

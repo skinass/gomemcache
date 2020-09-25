@@ -1,4 +1,4 @@
-package memcache
+package text
 
 var (
 	crlf            = []byte("\r\n")

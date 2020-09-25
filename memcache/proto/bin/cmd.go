@@ -1,4 +1,4 @@
-package memcache
+package bin
 
 import (
 	"bufio"
@@ -7,37 +7,39 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/skinass/gomemcache/memcache/types"
 )
 
-const BinaryProtoType = "binary"
+const ProtoType = "binary"
 
-var binCommander = &binCmdRunner{}
+var DefaultBinCommander = &cmdRunner{}
 
-type binCmdRunner struct{}
+type cmdRunner struct{}
 
-func (bcr *binCmdRunner) ProtoType() string {
-	return BinaryProtoType
+func (r *cmdRunner) ProtoType() string {
+	return ProtoType
 }
 
-func (bcr *binCmdRunner) IsAuthSupported() bool {
+func (r *cmdRunner) IsAuthSupported() bool {
 	return true
 }
 
-func (bcr *binCmdRunner) Auth(rw *bufio.ReadWriter, username, password string) error {
-	s, err := bcr.authList(rw)
+func (r *cmdRunner) Auth(rw *bufio.ReadWriter, username, password string) error {
+	s, err := r.authList(rw)
 	if err != nil {
 		return err
 	}
 
 	switch {
 	case strings.Index(s, "PLAIN") != -1:
-		return bcr.authPlain(rw, username, password)
+		return r.authPlain(rw, username, password)
 	}
 
 	return fmt.Errorf("memcache: unknown auth types %q", s)
 }
 
-func (bcr *binCmdRunner) authPlain(rw *bufio.ReadWriter, username, password string) error {
+func (r *cmdRunner) authPlain(rw *bufio.ReadWriter, username, password string) error {
 	m := &msg{
 		header: header{
 			Op: opAuthStart,
@@ -47,21 +49,21 @@ func (bcr *binCmdRunner) authPlain(rw *bufio.ReadWriter, username, password stri
 		val: []byte(fmt.Sprintf("\x00%s\x00%s", username, password)),
 	}
 
-	return binSendRecv(rw, m)
+	return sendRecv(rw, m)
 }
 
-func (bcr *binCmdRunner) authList(rw *bufio.ReadWriter) (string, error) {
+func (r *cmdRunner) authList(rw *bufio.ReadWriter) (string, error) {
 	m := &msg{
 		header: header{
 			Op: opAuthList,
 		},
 	}
 
-	err := binSendRecv(rw, m)
+	err := sendRecv(rw, m)
 	return string(m.val), err
 }
 
-func (bcr *binCmdRunner) GetCmd(rw *bufio.ReadWriter, keys []string, cb func(*Item)) error {
+func (r *cmdRunner) Get(rw *bufio.ReadWriter, keys []string, cb func(*types.Item)) error {
 	if len(keys) != 1 {
 		return fmt.Errorf("memcached: pipelining and multiple keys get are not supported for now")
 	}
@@ -74,32 +76,24 @@ func (bcr *binCmdRunner) GetCmd(rw *bufio.ReadWriter, keys []string, cb func(*It
 		oextras: []interface{}{&flags},
 		key:     keys[0],
 	}
-	err := binSendRecv(rw, m)
+	err := sendRecv(rw, m)
 	if err != nil {
 		return err
 	}
-	cb(&Item{
+	cb(&types.Item{
 		Key:   keys[0],
 		Value: m.val,
-		casid: m.CAS,
+		Casid: m.CAS,
 		Flags: flags,
 	})
 	return nil
 }
 
-func (bcr *binCmdRunner) PopulateCmd(rw *bufio.ReadWriter, verb string, item *Item) error {
+func (r *cmdRunner) Populate(rw *bufio.ReadWriter, verb types.Verb, item *types.Item) error {
+	op := verbToOp(verb)
 	var ocas uint64
-	var op opCode
-	switch verb {
-	case "cas":
-		op = opSet
-		ocas = item.casid
-	case "set":
-		op = opSet
-	case "add":
-		op = opAdd
-	case "replace":
-		op = opReplace
+	if verb == types.Cas {
+		ocas = item.Casid
 	}
 
 	m := &msg{
@@ -112,18 +106,18 @@ func (bcr *binCmdRunner) PopulateCmd(rw *bufio.ReadWriter, verb string, item *It
 		val:     item.Value,
 	}
 
-	err := binSendRecv(rw, m)
-	if err == ErrCASConflict && verb == "add" || verb == "replace" {
-		return ErrNotStored
+	err := sendRecv(rw, m)
+	if err == types.ErrCASConflict && verb == "add" || verb == "replace" {
+		return types.ErrNotStored
 	}
 	return err
 }
 
-func (bcr *binCmdRunner) Delete(rw *bufio.ReadWriter, key string) error {
-	return bcr.DeleteCas(rw, key, 0)
+func (r *cmdRunner) Delete(rw *bufio.ReadWriter, key string) error {
+	return r.DeleteCas(rw, key, 0)
 }
 
-func (bcr *binCmdRunner) DeleteCas(rw *bufio.ReadWriter, key string, cas uint64) error {
+func (r *cmdRunner) DeleteCas(rw *bufio.ReadWriter, key string, cas uint64) error {
 	m := &msg{
 		header: header{
 			Op:  opDelete,
@@ -131,33 +125,33 @@ func (bcr *binCmdRunner) DeleteCas(rw *bufio.ReadWriter, key string, cas uint64)
 		},
 		key: key,
 	}
-	return binSendRecv(rw, m)
+	return sendRecv(rw, m)
 }
 
-func (bcr *binCmdRunner) DeleteAll(rw *bufio.ReadWriter) error {
+func (r *cmdRunner) DeleteAll(rw *bufio.ReadWriter) error {
 	m := &msg{
 		header: header{
 			Op: opFlush,
 		},
 	}
-	return binSendRecv(rw, m)
+	return sendRecv(rw, m)
 }
 
-func (bcr *binCmdRunner) FlushAll(rw *bufio.ReadWriter) error {
-	return bcr.DeleteAll(rw)
+func (r *cmdRunner) FlushAll(rw *bufio.ReadWriter) error {
+	return r.DeleteAll(rw)
 }
 
-func (bcr *binCmdRunner) Ping(rw *bufio.ReadWriter) error {
+func (r *cmdRunner) Ping(rw *bufio.ReadWriter) error {
 	m := &msg{
 		header: header{
 			Op: opVersion,
 		},
 	}
 
-	return binSendRecv(rw, m)
+	return sendRecv(rw, m)
 }
 
-func (bcr *binCmdRunner) Touch(rw *bufio.ReadWriter, keys []string, expiration int32) error {
+func (r *cmdRunner) Touch(rw *bufio.ReadWriter, keys []string, expiration int32) error {
 	exp := uint32(expiration)
 	m := &msg{
 		header: header{
@@ -168,7 +162,7 @@ func (bcr *binCmdRunner) Touch(rw *bufio.ReadWriter, keys []string, expiration i
 
 	for _, key := range keys {
 		m.key = key
-		err := binSendRecv(rw, m)
+		err := sendRecv(rw, m)
 		if err != nil {
 			return err
 		}
@@ -177,14 +171,8 @@ func (bcr *binCmdRunner) Touch(rw *bufio.ReadWriter, keys []string, expiration i
 	return nil
 }
 
-func (bcr *binCmdRunner) IncrDecrCmd(rw *bufio.ReadWriter, verb, key string, delta uint64) (uint64, error) {
-	var op opCode
-	switch verb {
-	case "incr":
-		op = opIncrement
-	case "decr":
-		op = opDecrement
-	}
+func (r *cmdRunner) IncrDecr(rw *bufio.ReadWriter, verb types.Verb, key string, delta uint64) (uint64, error) {
+	op := verbToOp(verb)
 
 	var init uint64
 	var exp uint32 = 0xffffffff
@@ -197,15 +185,19 @@ func (bcr *binCmdRunner) IncrDecrCmd(rw *bufio.ReadWriter, verb, key string, del
 		key:     key,
 	}
 
-	err := binSendRecv(rw, m)
+	err := sendRecv(rw, m)
 	if err != nil {
 		return 0, err
 	}
-	val, err := binReadInt(string(m.val))
+	val, err := readInt(string(m.val))
 	return val, nil
 }
 
-func binReadInt(b string) (uint64, error) {
+func (r *cmdRunner) LegalKey(key string) bool {
+	return true
+}
+
+func readInt(b string) (uint64, error) {
 	switch len(b) {
 	case 8: // 64 bit
 		return uint64(uint64(b[7]) | uint64(b[6])<<8 | uint64(b[5])<<16 | uint64(b[4])<<24 |
@@ -215,7 +207,7 @@ func binReadInt(b string) (uint64, error) {
 	return 0, fmt.Errorf("memcache: error parsing int %s", b)
 }
 
-func binSend(rw *bufio.ReadWriter, m *msg) error {
+func send(rw *bufio.ReadWriter, m *msg) error {
 	m.Magic = magicSend
 	m.ExtraLen = sizeOfExtras(m.iextras)
 	m.KeyLen = uint16(len(m.key))
@@ -254,7 +246,7 @@ func binSend(rw *bufio.ReadWriter, m *msg) error {
 	return rw.Flush()
 }
 
-func binRecv(r *bufio.Reader, m *msg) error {
+func recv(r *bufio.Reader, m *msg) error {
 	err := binary.Read(r, binary.BigEndian, &m.header)
 	if err != nil {
 		return err
@@ -280,16 +272,16 @@ func binRecv(r *bufio.Reader, m *msg) error {
 	m.key = string(buf.Next(int(m.KeyLen)))
 	vlen := int(m.BodyLen) - int(m.ExtraLen) - int(m.KeyLen)
 	m.val = buf.Next(int(vlen))
-	return newErrorFromBinary(m.ResvOrStatus)
+	return newError(m.ResvOrStatus)
 }
 
-func binSendRecv(rw *bufio.ReadWriter, m *msg) error {
-	err := binSend(rw, m)
+func sendRecv(rw *bufio.ReadWriter, m *msg) error {
+	err := send(rw, m)
 	if err != nil {
 		return err
 	}
 
-	return binRecv(rw.Reader, m)
+	return recv(rw.Reader, m)
 }
 
 // sizeOfExtras returns the size of the extras field for the memcache request.
@@ -309,4 +301,23 @@ func sizeOfExtras(extras []interface{}) (l uint8) {
 		}
 	}
 	return
+}
+
+func verbToOp(verb types.Verb) opCode {
+	switch verb {
+	case "incr":
+		return opIncrement
+	case "decr":
+		return opDecrement
+	case "cas":
+		return opSet
+	case "set":
+		return opSet
+	case "add":
+		return opAdd
+	case "replace":
+		return opReplace
+	default:
+		return opVersion
+	}
 }

@@ -1,53 +1,55 @@
-package memcache
+package bin
+
+import "github.com/skinass/gomemcache/memcache/types"
 
 // Status Codes that may be returned (usually as part of an Error).
 const (
-	BinStatusOK             = uint16(0)
-	BinStatusNotFound       = uint16(1)
-	BinStatusKeyExists      = uint16(2)
-	BinStatusValueTooLarge  = uint16(3)
-	BinStatusInvalidArgs    = uint16(4)
-	BinStatusValueNotStored = uint16(5)
-	BinStatusNonNumeric     = uint16(6)
-	BinStatusAuthRequired   = uint16(0x20)
-	BinStatusAuthContinue   = uint16(0x21)
-	BinStatusUnknownCommand = uint16(0x81)
-	BinStatusOutOfMemory    = uint16(0x82)
-	BinStatusAuthUnknown    = uint16(0xffff)
-	BinStatusNetworkError   = uint16(0xfff1)
-	BinStatusUnknownError   = uint16(0xffff)
+	StatusOK             = uint16(0)
+	StatusNotFound       = uint16(1)
+	StatusKeyExists      = uint16(2)
+	StatusValueTooLarge  = uint16(3)
+	StatusInvalidArgs    = uint16(4)
+	StatusValueNotStored = uint16(5)
+	StatusNonNumeric     = uint16(6)
+	StatusAuthRequired   = uint16(0x20)
+	StatusAuthContinue   = uint16(0x21)
+	StatusUnknownCommand = uint16(0x81)
+	StatusOutOfMemory    = uint16(0x82)
+	StatusAuthUnknown    = uint16(0xffff)
+	StatusNetworkError   = uint16(0xfff1)
+	StatusUnknownError   = uint16(0xffff)
 )
 
-// newErrorFromBinary takes a status from the server and creates a matching Error.
-func newErrorFromBinary(status uint16) error {
+// newError takes a status from the server and creates a matching Error.
+func newError(status uint16) error {
 	switch status {
-	case BinStatusOK:
+	case StatusOK:
 		return nil
-	case BinStatusNotFound:
-		return ErrCacheMiss
-	case BinStatusKeyExists:
-		return ErrCASConflict
-	case BinStatusValueTooLarge:
-		return ErrValueTooLarge
-	case BinStatusInvalidArgs:
-		return ErrInvalidArgs
-	case BinStatusValueNotStored:
-		return ErrValueNotStored
-	case BinStatusNonNumeric:
-		return ErrNonNumeric
-	case BinStatusAuthRequired:
-		return ErrAuthRequired
+	case StatusNotFound:
+		return types.ErrCacheMiss
+	case StatusKeyExists:
+		return types.ErrCASConflict
+	case StatusValueTooLarge:
+		return types.ErrValueTooLarge
+	case StatusInvalidArgs:
+		return types.ErrInvalidArgs
+	case StatusValueNotStored:
+		return types.ErrValueNotStored
+	case StatusNonNumeric:
+		return types.ErrNonNumeric
+	case StatusAuthRequired:
+		return types.ErrAuthRequired
 
 	// we only support PLAIN auth, no mechanism that would make use of auth
 	// continue, so make it an error for now for completeness.
-	case BinStatusAuthContinue:
-		return ErrAuthContinue
-	case BinStatusUnknownCommand:
-		return ErrUnknownCommand
-	case BinStatusOutOfMemory:
-		return ErrOutOfMemory
+	case StatusAuthContinue:
+		return types.ErrAuthContinue
+	case StatusUnknownCommand:
+		return types.ErrUnknownCommand
+	case StatusOutOfMemory:
+		return types.ErrOutOfMemory
 	}
-	return ErrUnknownError
+	return types.ErrUnknownError
 }
 
 type opCode uint8
@@ -97,16 +99,16 @@ const (
 )
 
 // Magic Codes
-type binMagicCode uint8
+type MagicCode uint8
 
 const (
-	magicSend binMagicCode = 0x80
-	magicRecv binMagicCode = 0x81
+	magicSend MagicCode = 0x80
+	magicRecv MagicCode = 0x81
 )
 
 // Memcache header
 type header struct {
-	Magic        binMagicCode
+	Magic        MagicCode
 	Op           opCode
 	KeyLen       uint16
 	ExtraLen     uint8

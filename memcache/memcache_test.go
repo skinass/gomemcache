@@ -28,15 +28,18 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/skinass/gomemcache/memcache/proto/bin"
+	"github.com/skinass/gomemcache/memcache/proto/text"
 )
 
 var SupportedCfg = map[string]struct {
 	Touch    bool
 	GetMulti bool
 }{
-	TextProtoType: {
+	text.ProtoType: {
 		Touch: false, GetMulti: true},
-	BinaryProtoType: {
+	bin.ProtoType: {
 		Touch: true, GetMulti: false},
 }
 
@@ -72,7 +75,9 @@ func TestLocalhostTextProto(t *testing.T) {
 	if !setup(t) {
 		return
 	}
-	testWithClient(t, New(testTextServer))
+	c := New(testTextServer)
+	c.Timeout = time.Second
+	testWithClient(t, c)
 }
 
 func TestLocalhostBinaryProto(t *testing.T) {
@@ -170,16 +175,16 @@ func testWithClient(t *testing.T, c *Client) {
 	// Set malformed keys
 	malFormed := &Item{Key: "foo bar", Value: []byte("foobarval")}
 	err = c.Set(malFormed)
-	if c.ProtoType() == TextProtoType && err != ErrMalformedKey {
+	if c.ProtoType() == text.ProtoType && err != ErrMalformedKey {
 		t.Errorf("set(foo bar) should return ErrMalformedKey instead of %v", err)
-	} else if c.ProtoType() == BinaryProtoType && err != nil {
+	} else if c.ProtoType() == bin.ProtoType && err != nil {
 		t.Errorf("set(foo bar) should return nil instead of %v", err)
 	}
 	malFormed = &Item{Key: "foo" + string(0x7f), Value: []byte("foobarval")}
 	err = c.Set(malFormed)
-	if c.ProtoType() == TextProtoType && err != ErrMalformedKey {
+	if c.ProtoType() == text.ProtoType && err != ErrMalformedKey {
 		t.Errorf("set(foo<0x7f>) should return ErrMalformedKey instead of %v", err)
-	} else if c.ProtoType() == BinaryProtoType && err != nil {
+	} else if c.ProtoType() == bin.ProtoType && err != nil {
 		t.Errorf("set(foo<0x7f>) should return nil instead of %v", err)
 	}
 
@@ -248,9 +253,9 @@ func testWithClient(t *testing.T, c *Client) {
 	}
 	mustSet(&Item{Key: "num", Value: []byte("not-numeric")})
 	n, err = c.Increment("num", 1)
-	if c.ProtoType() == TextProtoType && (err == nil || !strings.Contains(err.Error(), "client error")) {
+	if c.ProtoType() == text.ProtoType && (err == nil || !strings.Contains(err.Error(), "client error")) {
 		t.Fatalf("increment non-number: want client error, got %v", err)
-	} else if c.ProtoType() == BinaryProtoType && err != ErrNonNumeric {
+	} else if c.ProtoType() == bin.ProtoType && err != ErrNonNumeric {
 		t.Fatalf("increment non-number: want ErrNonNumeric, got %v", err)
 	}
 
