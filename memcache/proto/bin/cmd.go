@@ -64,9 +64,17 @@ func (r *cmdRunner) authList(rw *bufio.ReadWriter) (string, error) {
 }
 
 func (r *cmdRunner) Get(rw *bufio.ReadWriter, keys []string, cb func(*types.Item)) error {
-	if len(keys) != 1 {
-		return fmt.Errorf("memcached: pipelining and multiple keys get are not supported for now")
+	var err error
+	for _, key := range keys {
+		if eg := r.getOne(rw, key, cb); eg != nil && eg != types.ErrCacheMiss {
+			err = eg
+		}
 	}
+
+	return err
+}
+
+func (r *cmdRunner) getOne(rw *bufio.ReadWriter, key string, cb func(*types.Item)) error {
 	var flags uint32
 	m := &msg{
 		header: header{
@@ -74,14 +82,14 @@ func (r *cmdRunner) Get(rw *bufio.ReadWriter, keys []string, cb func(*types.Item
 			CAS: uint64(0),
 		},
 		oextras: []interface{}{&flags},
-		key:     keys[0],
+		key:     key,
 	}
 	err := sendRecv(rw, m)
 	if err != nil {
 		return err
 	}
 	cb(&types.Item{
-		Key:   keys[0],
+		Key:   key,
 		Value: m.val,
 		Casid: m.CAS,
 		Flags: flags,

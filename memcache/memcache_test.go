@@ -302,6 +302,25 @@ func testWithClient(t *testing.T, c *Client) {
 	err = c.CompareAndSwap(casItem)
 	checkErr(err, "compareAndSwap (cas_key_pass): %v", err)
 
+	err = c.Set(&Item{Key: "get_multi_1", Value: []byte("123")})
+	checkErr(err, "set (get_multi_1): %v", err)
+	err = c.Set(&Item{Key: "get_multi_2", Value: []byte("321")})
+	checkErr(err, "set (get_multi_2): %v", err)
+
+	res, err := c.GetMulti([]string{"get_multi_1", "get_multi_2", "get_multi_3"})
+	checkErr(err, "get (get_multi_{1,2}): %v", err)
+	if res["get_multi_1"].Key != "get_multi_1" {
+		t.Errorf("get(get_multi_1) Key = %q, want get_multi_1", res["get_multi_1"].Key)
+	}
+	if string(res["get_multi_1"].Value) != "123" {
+		t.Errorf("get(get_multi_1) Value = %q, want 123", string(res["get_multi_1"].Value))
+	}
+	if res["get_multi_2"].Key != "get_multi_2" {
+		t.Errorf("get(get_multi_2) Key = %q, want get_multi_2", res["get_multi_2"].Key)
+	}
+	if string(res["get_multi_2"].Value) != "321" {
+		t.Errorf("get(get_multi_2) Value = %q, want 321", string(res["get_multi_2"].Value))
+	}
 }
 
 func testTouchWithClient(t *testing.T, c *Client) {
