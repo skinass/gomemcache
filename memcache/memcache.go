@@ -20,6 +20,7 @@ package memcache
 import (
 	"bufio"
 	"net"
+	"strings"
 
 	"sync"
 	"time"
@@ -143,6 +144,8 @@ type Client struct {
 
 	lk       sync.Mutex
 	freeconn map[string][]*conn
+
+	checkReconnectibleError func(error) bool
 }
 
 type CmdRunner interface {
@@ -281,11 +284,15 @@ func (c *Client) dial(addr net.Addr) (net.Conn, error) {
 	return nil, err
 }
 
-func (c *Client) getConn(addr net.Addr) (*conn, error) {
-	cn, ok := c.getFreeConn(addr)
-	if ok {
-		cn.extendDeadline()
-		return cn, nil
+func (c *Client) getConn(addr net.Addr, needNew bool) (*conn, error) {
+	var cn *conn
+	if !needNew {
+		var ok bool
+		cn, ok = c.getFreeConn(addr)
+		if ok {
+			cn.extendDeadline()
+			return cn, nil
+		}
 	}
 	nc, err := c.dial(addr)
 	if err != nil {
@@ -312,15 +319,21 @@ func (c *Client) onItem(item *Item, fn func(*Client, *bufio.ReadWriter, *Item) e
 	if err != nil {
 		return err
 	}
-	cn, err := c.getConn(addr)
+	cn, err := c.getConn(addr, false)
 	if err != nil {
 		return err
 	}
 	defer cn.condRelease(&err)
-	if err = fn(c, cn.rw, item); err != nil {
+	if err = fn(c, cn.rw, item); err == nil || !c.isReconectibleError(err) {
 		return err
 	}
-	return nil
+
+	cn, errRetry := c.getConn(addr, true)
+	if errRetry != nil {
+		return errRetry
+	}
+	defer cn.condRelease(&errRetry)
+	return fn(c, cn.rw, item)
 }
 
 func (c *Client) FlushAll() error {
@@ -363,11 +376,21 @@ func (c *Client) withKeyAddr(key string, fn func(net.Addr) error) (err error) {
 }
 
 func (c *Client) withAddrRw(addr net.Addr, fn func(*bufio.ReadWriter) error) (err error) {
-	cn, err := c.getConn(addr)
+	cn, err := c.getConn(addr, false)
 	if err != nil {
 		return err
 	}
 	defer cn.condRelease(&err)
+	err = fn(cn.rw)
+	if err == nil || !c.isReconectibleError(err) {
+		return err
+	}
+
+	cn, errRetry := c.getConn(addr, true)
+	if errRetry != nil {
+		return errRetry
+	}
+	defer cn.condRelease(&errRetry)
 	return fn(cn.rw)
 }
 
@@ -536,6 +559,31 @@ func (c *Client) incrDecr(verb types.Verb, key string, delta uint64) (uint64, er
 		return errIncDec
 	})
 	return val, err
+}
+
+func (c *Client) isReconectibleError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if c.checkReconnectibleError != nil {
+		return c.checkReconnectibleError(err)
+	}
+
+	if strings.Contains(err.Error(), "read: connection reset") {
+		return false
+	}
+
+	if strings.Contains(err.Error(), "connection reset") ||
+		strings.Contains(err.Error(), "broken pipe") {
+		return true
+	}
+
+	return false
+}
+
+func (c *Client) SetCheckReconnectibleError(f func(error) bool) {
+	c.checkReconnectibleError = f
 }
 
 func legalKey(key string) bool {
