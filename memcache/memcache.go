@@ -19,8 +19,10 @@ package memcache
 
 import (
 	"bufio"
+	"errors"
 	"net"
 	"strings"
+	"syscall"
 
 	"sync"
 	"time"
@@ -570,12 +572,14 @@ func (c *Client) isReconectibleError(err error) bool {
 		return c.checkReconnectibleError(err)
 	}
 
+	if errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+
 	if strings.Contains(err.Error(), "read: connection reset") {
 		return false
 	}
-
-	if strings.Contains(err.Error(), "connection reset") ||
-		strings.Contains(err.Error(), "broken pipe") {
+	if strings.Contains(err.Error(), "connection reset") {
 		return true
 	}
 
