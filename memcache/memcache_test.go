@@ -45,12 +45,12 @@ var SupportedCfg = map[string]struct {
 
 const (
 	doLocalhostTextProtoTest = true
-	testTextServer           = "fdev13.mail.cloud.devmail.ru:11211"
+	testTextServer           = "127.0.0.1:11211"
 )
 
 const (
 	doLocalhostBinaryProtoTest                         = true
-	testBinaryServer                                   = "172.27.76.29:11211"
+	testBinaryServer                                   = "127.0.0.1:11212"
 	testBinaryServerUsername, testBinaryServerPassword = "testuser", "123"
 )
 

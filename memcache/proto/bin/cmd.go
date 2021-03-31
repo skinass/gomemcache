@@ -159,6 +159,40 @@ func (r *cmdRunner) Ping(rw *bufio.ReadWriter) error {
 	return sendRecv(rw, m)
 }
 
+func (r *cmdRunner) Stat(rw *bufio.ReadWriter, cb func(k string, v []byte)) error {
+	m := &msg{
+		header: header{
+			Op: opStat,
+		},
+	}
+
+	err := sendRecv(rw, m)
+	if err != nil {
+		return err
+	}
+
+	cb(m.key, m.val)
+
+	for {
+		m = &msg{
+			header: header{
+				Op: opStat,
+			},
+		}
+		err = recv(rw.Reader, m)
+		if err != nil {
+			return err
+		}
+		if m.key == "" {
+			break
+		}
+
+		cb(m.key, m.val)
+	}
+
+	return nil
+}
+
 func (r *cmdRunner) Touch(rw *bufio.ReadWriter, keys []string, expiration int32) error {
 	exp := uint32(expiration)
 	m := &msg{
